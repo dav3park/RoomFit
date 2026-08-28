@@ -9,10 +9,8 @@ enum BackendConfig {
     // 로컬 백엔드 테스트가 필요하면 baseURL을 Mac의 로컬 IP로 임시 변경할 수 있습니다.
     // 단, 이 변경은 로컬 디버그 빌드에서만 하고 Release/Archive 전에는 반드시
     // 아래 Production 주소로 되돌려야 합니다.
-    static let baseURL = URL(string: "https://roomfit-backend.onrender.com")!
-
-    /// Room 업로드 성공 후 사용자를 넘겨줄 RoomFit Web의 Production 주소.
-    static let webBaseURL = URL(string: "https://roomfit-web-tau.vercel.app")!
+    static let baseURL = URL(string: "https://roomfit-khu.kro.kr")!
+    static let webBaseURL = URL(string: "https://roomfit-khu.kro.kr")!
 
     static var roomUploadURL: URL {
         baseURL

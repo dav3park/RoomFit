@@ -196,11 +196,15 @@ final class RoomScanController: NSObject, ObservableObject {
             RoomFitWall(id: "wall-west-lower-gap-fill", start: RoomFitPosition(x: 0, z: 1.51),
                         end: RoomFitPosition(x: 0, z: 3.47), height: 2.28, thickness: 0.1)
         ]
+        // `wall` references a `walls[].id` above (not a cardinal side) and
+        // `offset` is measured from that wall's own `start` toward `end` —
+        // see `RoomFitOpening` / `extractOpenings`. Recomputed from the same
+        // absolute positions the old north/south/east/west offsets used.
         let openings: [RoomFitOpening] = [
-            RoomFitOpening(id: "sample-door", type: "door", wall: "west",
-                            offset: 0.47, width: 0.74, height: 2.09, sillHeight: nil),
-            RoomFitOpening(id: "sample-window", type: "window", wall: "east",
-                            offset: 1.67, width: 1.77, height: 1.66, sillHeight: 0.41)
+            RoomFitOpening(id: "sample-door", type: "door", wall: "wall-west-upper",
+                            offset: 1.04, width: 0.74, height: 2.09, sillHeight: nil),
+            RoomFitOpening(id: "sample-window", type: "window", wall: "wall-east",
+                            offset: 1.61, width: 1.77, height: 1.66, sillHeight: 0.41)
         ]
 
         // 원본 스캔 좌표 그대로 두면 room width/depth 경계까지 여유가 1~6cm밖에
@@ -385,53 +389,58 @@ final class RoomScanController: NSObject, ObservableObject {
     /// RoomPlan's own `export(to:exportOptions:)`), since patches are positioned
     /// using that frame.
     private func closeWallGaps(in usdzURL: URL, capturedRoom: CapturedRoom, frame: RoomReferenceFrame) {
-        let gapsBySide = WallSide.allCases.map { side in
-            (side, coverageGaps(for: side, capturedRoom: capturedRoom, frame: frame))
+        let gapEdges: [(start: (x: Double, z: Double), end: (x: Double, z: Double))]
+        if let perimeter = orderedPerimeter(from: capturedRoom.walls, frame: frame) {
+            gapEdges = perimeter.filter { $0.isGapFill }.map { (start: $0.start, end: $0.end) }
+        } else {
+            gapEdges = WallSide.allCases.flatMap { side -> [(start: (x: Double, z: Double), end: (x: Double, z: Double))] in
+                legacyCoverageGaps(for: side, capturedRoom: capturedRoom, frame: frame).map { gap in
+                    let corners = legacyCornerPoints(for: side, start: gap.start, end: gap.end, frame: frame)
+                    return (start: corners.a, end: corners.b)
+                }
+            }
         }
-        guard gapsBySide.contains(where: { !$0.1.isEmpty }) else { return }
+        guard !gapEdges.isEmpty else { return }
 
         guard let scene = try? SCNScene(url: usdzURL, options: nil) else { return }
         let wallHeight = roomHeight(from: capturedRoom)
 
-        for (side, gaps) in gapsBySide {
-            for gap in gaps {
-                let (cornerA, cornerB) = cornerPoints(for: side, start: gap.start, end: gap.end, frame: frame)
-                let worldA = worldPoint(fromCornerX: cornerA.x, cornerZ: cornerA.z, frame: frame)
-                let worldB = worldPoint(fromCornerX: cornerB.x, cornerZ: cornerB.z, frame: frame)
+        for edge in gapEdges {
+            let worldA = worldPoint(fromCornerX: edge.start.x, cornerZ: edge.start.z, frame: frame)
+            let worldB = worldPoint(fromCornerX: edge.end.x, cornerZ: edge.end.z, frame: frame)
 
-                let dx = worldB.x - worldA.x
-                let dz = worldB.z - worldA.z
-                let length = (dx * dx + dz * dz).squareRoot()
-                guard length > 0.05 else { continue }
+            let dx = worldB.x - worldA.x
+            let dz = worldB.z - worldA.z
+            let length = (dx * dx + dz * dz).squareRoot()
+            guard length > 0.05 else { continue }
 
-                // A real SCNBox (not a zero-thickness SCNPlane) so the patched
-                // section reads as a solid wall like its neighbors instead of a
-                // paper-thin cutout.
-                let wallThickness = 0.1
-                let wallGeometry = SCNBox(
-                    width: CGFloat(length),
-                    height: CGFloat(wallHeight),
-                    length: CGFloat(wallThickness),
-                    chamferRadius: 0
-                )
-                let material = SCNMaterial()
-                material.diffuse.contents = UIColor(white: 0.85, alpha: 1)
-                wallGeometry.materials = Array(repeating: material, count: 6)
+            // A real SCNBox (not a zero-thickness SCNPlane) so the patched
+            // section reads as a solid wall like its neighbors instead of a
+            // paper-thin cutout.
+            let wallThickness = 0.1
+            let wallGeometry = SCNBox(
+                width: CGFloat(length),
+                height: CGFloat(wallHeight),
+                length: CGFloat(wallThickness),
+                chamferRadius: 0
+            )
+            let material = SCNMaterial()
+            material.diffuse.contents = UIColor(white: 0.85, alpha: 1)
+            wallGeometry.materials = Array(repeating: material, count: 6)
 
-                let wallNode = SCNNode(geometry: wallGeometry)
-                wallNode.position = SCNVector3(
-                    Float((worldA.x + worldB.x) / 2),
-                    Float(frame.originY + wallHeight / 2),
-                    Float((worldA.z + worldB.z) / 2)
-                )
-                // SCNBox's local +X ("width" axis) starts aligned with world +X;
-                // rotating by atan2(-dz, dx) around Y turns it to face the A→B
-                // direction (SceneKit's Y-rotation matrix sends +Z toward +X for
-                // positive angles).
-                wallNode.eulerAngles = SCNVector3(0, Float(atan2(-dz, dx)), 0)
+            let wallNode = SCNNode(geometry: wallGeometry)
+            wallNode.position = SCNVector3(
+                Float((worldA.x + worldB.x) / 2),
+                Float(frame.originY + wallHeight / 2),
+                Float((worldA.z + worldB.z) / 2)
+            )
+            // SCNBox's local +X ("width" axis) starts aligned with world +X;
+            // rotating by atan2(-dz, dx) around Y turns it to face the A→B
+            // direction (SceneKit's Y-rotation matrix sends +Z toward +X for
+            // positive angles).
+            wallNode.eulerAngles = SCNVector3(0, Float(atan2(-dz, dx)), 0)
 
-                scene.rootNode.addChildNode(wallNode)
-            }
+            scene.rootNode.addChildNode(wallNode)
         }
 
         try? scene.write(to: usdzURL, options: nil, delegate: nil, progressHandler: nil)
@@ -439,8 +448,9 @@ final class RoomScanController: NSObject, ObservableObject {
 
     /// Uncovered stretches along one side of the room's perimeter, in that side's
     /// own [0, sideLength] space — gaps under 15cm are ignored as corner/measurement
-    /// noise rather than a real hole.
-    private func coverageGaps(
+    /// noise rather than a real hole. Legacy rectangle-only fallback — see
+    /// `orderedPerimeter` for the primary polygon-based path.
+    private func legacyCoverageGaps(
         for side: WallSide,
         capturedRoom: CapturedRoom,
         frame: RoomReferenceFrame
@@ -449,8 +459,8 @@ final class RoomScanController: NSObject, ObservableObject {
         let minGap = 0.15
 
         let intervals = capturedRoom.walls
-            .filter { wallSide(of: $0, frame: frame) == side }
-            .map { wallInterval($0, side: side, frame: frame) }
+            .filter { legacyWallSide(of: $0, frame: frame) == side }
+            .map { legacyWallInterval($0, side: side, frame: frame) }
             .sorted { $0.start < $1.start }
 
         var gaps: [(start: Double, end: Double)] = []
@@ -471,7 +481,7 @@ final class RoomScanController: NSObject, ObservableObject {
     /// A wall's own span, projected onto its side's axis (x for north/south walls,
     /// z for east/west), in the room's corner-origin space — used to find gaps
     /// between/around individually-captured wall segments on the same side.
-    private func wallInterval(_ wall: CapturedRoom.Surface, side: WallSide, frame: RoomReferenceFrame) -> (start: Double, end: Double) {
+    private func legacyWallInterval(_ wall: CapturedRoom.Surface, side: WallSide, frame: RoomReferenceFrame) -> (start: Double, end: Double) {
         let direction = normalizedXZ(wall.transform.columns.0)
         let halfLength = Double(wall.dimensions.x) / 2
         let centerX = Double(wall.transform.columns.3.x)
@@ -496,7 +506,7 @@ final class RoomScanController: NSObject, ObservableObject {
 
     /// Two points along one side of the room's [0, width] x [0, depth] rectangle,
     /// in that corner-origin space, spanning [start, end] of that side's own axis.
-    private func cornerPoints(for side: WallSide, start: Double, end: Double, frame: RoomReferenceFrame) -> (a: (x: Double, z: Double), b: (x: Double, z: Double)) {
+    private func legacyCornerPoints(for side: WallSide, start: Double, end: Double, frame: RoomReferenceFrame) -> (a: (x: Double, z: Double), b: (x: Double, z: Double)) {
         switch side {
         case .north: return ((start, 0), (end, 0))
         case .south: return ((start, frame.depth), (end, frame.depth))
@@ -631,11 +641,11 @@ final class RoomScanController: NSObject, ObservableObject {
             depth: roundedOffset(frame?.depth ?? roomDepthFallback(from: capturedRoom)),
             height: roomHeight(from: capturedRoom)
         )
-        let openings = extractOpenings(from: capturedRoom, frame: frame)
-        let furniture = extractFurniture(from: capturedRoom, frame: frame)
         let walls = extractWalls(from: capturedRoom, frame: frame)
+        let openings = extractOpenings(from: capturedRoom, frame: frame, walls: walls)
+        let furniture = extractFurniture(from: capturedRoom, frame: frame)
 
-        appendRoomSummary(room: room, capturedRoom: capturedRoom, frame: frame, openings: openings, furniture: furniture)
+        appendRoomSummary(room: room, walls: walls, openings: openings, furniture: furniture)
         lastDebugInfo = debugLogLines.joined(separator: "\n")
 
         return RoomFitRoomJSON(room: room, walls: walls, openings: openings, furniture: furniture)
@@ -646,32 +656,18 @@ final class RoomScanController: NSObject, ObservableObject {
     /// step-by-step trace — makes the shared debug text readable top-to-bottom.
     private func appendRoomSummary(
         room: RoomFitRoom,
-        capturedRoom: CapturedRoom,
-        frame: RoomReferenceFrame?,
+        walls: [RoomFitWall],
         openings: [RoomFitOpening],
         furniture: [RoomFitFurniture]
     ) {
         logDebug("---")
         logDebug("[RoomFit] room = width:\(room.width) depth:\(room.depth) height:\(room.height)")
 
-        if let frame {
-            var anyGaps = false
-            for side in WallSide.allCases {
-                let sideWalls = capturedRoom.walls.filter { wallSide(of: $0, frame: frame) == side }
-                let totalLength = sideWalls.reduce(0) { $0 + Double($1.dimensions.x) }
-                let gaps = coverageGaps(for: side, capturedRoom: capturedRoom, frame: frame)
-                let gapDescription = gaps.isEmpty
-                    ? "no gaps"
-                    : "gap(s): " + gaps.map { "\(roundedOffset($0.start))-\(roundedOffset($0.end))" }.joined(separator: ", ")
-                logDebug("[RoomFit] side \(side.rawValue): \(sideWalls.count) wall(s), total length \(roundedOffset(totalLength)), \(gapDescription)")
-                anyGaps = anyGaps || !gaps.isEmpty
-            }
-            logDebug(anyGaps ? "[RoomFit] gaps found — patched with synthetic wall(s) in the 3D export" : "[RoomFit] wall loop looks closed")
-        } else {
-            logDebug("[RoomFit] no reference frame — room size used a raw wall-dimension fallback")
-        }
-
-        logDebug("[RoomFit] walls exported: \(capturedRoom.walls.count), openings: \(openings.count), furniture: \(furniture.count)")
+        let gapFillCount = walls.filter { $0.id.hasPrefix("gap-fill-") || $0.id.hasPrefix("legacy-gap-fill-") }.count
+        logDebug(gapFillCount == 0
+            ? "[RoomFit] perimeter loop closed with no synthetic gap-fill walls"
+            : "[RoomFit] perimeter loop closed with \(gapFillCount) synthetic gap-fill wall(s)")
+        logDebug("[RoomFit] walls exported: \(walls.count), openings: \(openings.count), furniture: \(furniture.count)")
     }
 
     // MARK: - Room-local coordinate frame
@@ -697,6 +693,137 @@ final class RoomScanController: NSObject, ObservableObject {
 
     private enum WallSide: String, CaseIterable {
         case north, south, east, west
+    }
+
+    /// One edge of the room's true perimeter polygon, in the same corner-origin
+    /// space as furniture/opening coordinates. `isGapFill` marks a synthetic edge
+    /// inserted to bridge an uncaptured stretch between two real walls (or back to
+    /// the loop's start) — everything else is a directly captured `CapturedRoom`
+    /// wall, keeping that wall's own `identifier` as `id`.
+    private struct PerimeterEdge {
+        let id: String
+        let start: (x: Double, z: Double)
+        let end: (x: Double, z: Double)
+        let isGapFill: Bool
+    }
+
+    /// Reduces `walls` to a single ordered, closed loop describing the room's true
+    /// footprint — an arbitrary polygon, not just a rectangle's 4 cardinal sides.
+    /// Works by greedily chaining each wall's nearest not-yet-used endpoint onto
+    /// the current end of the loop (closing back to the start once every wall is
+    /// used), inserting a straight synthetic edge wherever the nearest endpoint is
+    /// further than `minGap` (a real gap in capture, e.g. an uncaptured doorway
+    /// wall) but still within `maxGap` (close enough to plausibly be the same
+    /// room's boundary rather than an unrelated far wall).
+    ///
+    /// This is a greedy nearest-neighbor tour, not an exact polygon solver — for a
+    /// rectangular or simple L-shaped room it reduces to exactly the loop a human
+    /// would draw, but a heavily fragmented/self-intersecting scan could in
+    /// principle pick the wrong neighbor. `maxGap` keeps a bad pick from silently
+    /// producing a wildly wrong shape; if the walls never reduce to one closed
+    /// loop at all, this returns nil so the caller can fall back to the older
+    /// rectangle-only export instead of emitting broken geometry.
+    private func orderedPerimeter(
+        from walls: [CapturedRoom.Surface],
+        frame: RoomReferenceFrame
+    ) -> [PerimeterEdge]? {
+        guard !walls.isEmpty else { return nil }
+
+        let minGap = 0.15
+        let maxGap = 3.0
+
+        struct Segment {
+            let id: String
+            var start: (x: Double, z: Double)
+            var end: (x: Double, z: Double)
+        }
+
+        func distance(_ a: (x: Double, z: Double), _ b: (x: Double, z: Double)) -> Double {
+            let dx = a.x - b.x, dz = a.z - b.z
+            return (dx * dx + dz * dz).squareRoot()
+        }
+
+        var remaining: [Segment] = walls.map { wall in
+            let direction = normalizedXZ(wall.transform.columns.0)
+            let halfLength = Double(wall.dimensions.x) / 2
+            let centerX = Double(wall.transform.columns.3.x)
+            let centerZ = Double(wall.transform.columns.3.z)
+            let start = cornerCoordinates(
+                worldX: centerX - direction.x * halfLength,
+                worldZ: centerZ - direction.z * halfLength,
+                frame: frame
+            )
+            let end = cornerCoordinates(
+                worldX: centerX + direction.x * halfLength,
+                worldZ: centerZ + direction.z * halfLength,
+                frame: frame
+            )
+            return Segment(id: wall.identifier.uuidString, start: start, end: end)
+        }
+
+        var edges: [PerimeterEdge] = []
+        let first = remaining.removeFirst()
+        let loopStart = first.start
+        edges.append(PerimeterEdge(id: first.id, start: first.start, end: first.end, isGapFill: false))
+        var cursor = first.end
+        var gapFillIndex = 0
+
+        while !remaining.isEmpty {
+            var bestIndex: Int?
+            var bestFlipped = false
+            var bestDistance = Double.greatestFiniteMagnitude
+
+            for (index, segment) in remaining.enumerated() {
+                let toStart = distance(cursor, segment.start)
+                if toStart < bestDistance {
+                    bestDistance = toStart
+                    bestIndex = index
+                    bestFlipped = false
+                }
+                let toEnd = distance(cursor, segment.end)
+                if toEnd < bestDistance {
+                    bestDistance = toEnd
+                    bestIndex = index
+                    bestFlipped = true
+                }
+            }
+
+            guard let index = bestIndex, bestDistance <= maxGap else {
+                return nil
+            }
+
+            var next = remaining.remove(at: index)
+            if bestFlipped {
+                swap(&next.start, &next.end)
+            }
+
+            if bestDistance > minGap {
+                gapFillIndex += 1
+                edges.append(PerimeterEdge(
+                    id: "gap-fill-\(gapFillIndex)",
+                    start: cursor,
+                    end: next.start,
+                    isGapFill: true
+                ))
+            }
+
+            edges.append(PerimeterEdge(id: next.id, start: next.start, end: next.end, isGapFill: false))
+            cursor = next.end
+        }
+
+        let closingGap = distance(cursor, loopStart)
+        guard closingGap <= maxGap else { return nil }
+        if closingGap > minGap {
+            gapFillIndex += 1
+            edges.append(PerimeterEdge(
+                id: "gap-fill-\(gapFillIndex)",
+                start: cursor,
+                end: loopStart,
+                isGapFill: true
+            ))
+        }
+
+        return edges
     }
 
     private func logDebug(_ message: String) {
@@ -850,7 +977,10 @@ final class RoomScanController: NSObject, ObservableObject {
         return rounded
     }
 
-    private func wallSide(of wall: CapturedRoom.Surface, frame: RoomReferenceFrame) -> WallSide {
+    /// Legacy 4-cardinal-side bucketing — only used by the legacy rectangle-only
+    /// fallback path now (see `orderedPerimeter`), kept for when a scan is too
+    /// fragmented to reduce to a single closed polygon loop.
+    private func legacyWallSide(of wall: CapturedRoom.Surface, frame: RoomReferenceFrame) -> WallSide {
         let direction = normalizedXZ(wall.transform.columns.0)
         let alongX = abs(direction.x * frame.xAxisX + direction.z * frame.xAxisZ)
         let alongZ = abs(direction.x * frame.zAxisX + direction.z * frame.zAxisZ)
@@ -903,29 +1033,33 @@ final class RoomScanController: NSObject, ObservableObject {
 
     // MARK: - Openings
 
-    private func extractOpenings(from capturedRoom: CapturedRoom, frame: RoomReferenceFrame?) -> [RoomFitOpening] {
+    /// `walls` must be the same list `extractWalls` produced for this scan — a
+    /// door/window attaches to a real wall by that wall's own `id` (not a
+    /// cardinal side), so any wall in the room's perimeter (not just one of 4)
+    /// can host an opening.
+    private func extractOpenings(from capturedRoom: CapturedRoom, frame: RoomReferenceFrame?, walls: [RoomFitWall]) -> [RoomFitOpening] {
         guard let frame else { return [] }
 
-        func wallSideAndOffset(for surface: CapturedRoom.Surface) -> (WallSide, Double)? {
+        func wallIdAndOffset(for surface: CapturedRoom.Surface) -> (String, Double)? {
             guard let wall = resolveWall(for: surface, walls: capturedRoom.walls) else { return nil }
-            let side = wallSide(of: wall, frame: frame)
+            let wallId = wall.identifier.uuidString
+            guard let exportedWall = walls.first(where: { $0.id == wallId }) else { return nil }
             let corner = cornerCoordinates(
                 worldX: Double(surface.transform.columns.3.x),
                 worldZ: Double(surface.transform.columns.3.z),
                 frame: frame
             )
-            let offset = (side == .north || side == .south) ? corner.x : corner.z
-            return (side, roundedOffset(offset))
+            return (wallId, projectOntoWall(x: corner.x, z: corner.z, wall: exportedWall))
         }
 
         var openings: [RoomFitOpening] = []
 
         for door in capturedRoom.doors {
-            guard let (side, offset) = wallSideAndOffset(for: door) else { continue }
+            guard let (wallId, offset) = wallIdAndOffset(for: door) else { continue }
             openings.append(RoomFitOpening(
                 id: door.identifier.uuidString,
                 type: "door",
-                wall: side.rawValue,
+                wall: wallId,
                 offset: offset,
                 width: roundedOffset(Double(door.dimensions.x)),
                 height: roundedOffset(Double(door.dimensions.y)),
@@ -934,12 +1068,12 @@ final class RoomScanController: NSObject, ObservableObject {
         }
 
         for window in capturedRoom.windows {
-            guard let (side, offset) = wallSideAndOffset(for: window) else { continue }
+            guard let (wallId, offset) = wallIdAndOffset(for: window) else { continue }
             let bottomY = Double(window.transform.columns.3.y) - Double(window.dimensions.y) / 2
             openings.append(RoomFitOpening(
                 id: window.identifier.uuidString,
                 type: "window",
-                wall: side.rawValue,
+                wall: wallId,
                 offset: offset,
                 width: roundedOffset(Double(window.dimensions.x)),
                 height: roundedOffset(Double(window.dimensions.y)),
@@ -950,15 +1084,55 @@ final class RoomScanController: NSObject, ObservableObject {
         return openings
     }
 
+    /// Scalar distance from `wall.start` toward `wall.end`, clamped to the wall's
+    /// own length — the `RoomFitOpening.wall`/`offset` convention, so a door or
+    /// window can attach to any wall in the perimeter, not just one of 4 cardinal
+    /// sides.
+    private func projectOntoWall(x: Double, z: Double, wall: RoomFitWall) -> Double {
+        let dx = wall.end.x - wall.start.x
+        let dz = wall.end.z - wall.start.z
+        let length = (dx * dx + dz * dz).squareRoot()
+        guard length > 0 else { return 0 }
+        let alongX = x - wall.start.x
+        let alongZ = z - wall.start.z
+        let projected = (alongX * dx + alongZ * dz) / length
+        return roundedOffset(max(0, min(length, projected)))
+    }
+
     // MARK: - Walls
 
     /// The real captured wall segments (start/end in the same corner-origin space
-    /// as furniture/opening coordinates) — lets consumers (e.g. the web frontend)
-    /// draw the room's true shape instead of only having a width x height
-    /// rectangle to idealize from.
+    /// as furniture/opening coordinates), chained into perimeter order — lets
+    /// consumers (e.g. the web frontend) draw the room's true polygon shape
+    /// (L-shaped/non-rectangular rooms included) instead of only having a
+    /// width x height rectangle to idealize from.
     private func extractWalls(from capturedRoom: CapturedRoom, frame: RoomReferenceFrame?) -> [RoomFitWall] {
         guard let frame else { return [] }
 
+        if let perimeter = orderedPerimeter(from: capturedRoom.walls, frame: frame) {
+            let wallLookup = Dictionary(uniqueKeysWithValues: capturedRoom.walls.map { ($0.identifier.uuidString, $0) })
+            let fallbackHeight = roundedOffset(roomHeight(from: capturedRoom))
+            return perimeter.map { edge in
+                let wall = wallLookup[edge.id]
+                return RoomFitWall(
+                    id: edge.id,
+                    start: RoomFitPosition(x: roundedOffset(edge.start.x), z: roundedOffset(edge.start.z)),
+                    end: RoomFitPosition(x: roundedOffset(edge.end.x), z: roundedOffset(edge.end.z)),
+                    height: wall.map { roundedOffset(Double($0.dimensions.y)) } ?? fallbackHeight,
+                    thickness: wall.map { roundedOffset(Double($0.dimensions.z)) } ?? 0.1
+                )
+            }
+        }
+
+        logDebug("[RoomFit] perimeter chaining could not close a simple loop — falling back to legacy rectangle wall export")
+        return legacyExtractWalls(from: capturedRoom, frame: frame)
+    }
+
+    /// Pre-polygon-support fallback: squares the room off into 4 cardinal sides,
+    /// same as the export always used to. Only reached when `orderedPerimeter`
+    /// can't reduce the captured walls to one simple closed loop (a badly
+    /// fragmented scan) — the common case now goes through the polygon path above.
+    private func legacyExtractWalls(from capturedRoom: CapturedRoom, frame: RoomReferenceFrame) -> [RoomFitWall] {
         var walls = capturedRoom.walls.map { wall -> RoomFitWall in
             let direction = normalizedXZ(wall.transform.columns.0)
             let halfLength = Double(wall.dimensions.x) / 2
@@ -985,17 +1159,13 @@ final class RoomScanController: NSObject, ObservableObject {
             )
         }
 
-        // The same gap patch already applied to the 3D USDZ preview (`closeWallGaps`)
-        // needs to land here too — otherwise this JSON (and anything downstream,
-        // like the web frontend) still shows the raw hole the patch was built to
-        // hide, since that SceneKit patch only ever touched the exported model file.
         let wallHeight = roomHeight(from: capturedRoom)
         for side in WallSide.allCases {
-            let gaps = coverageGaps(for: side, capturedRoom: capturedRoom, frame: frame)
+            let gaps = legacyCoverageGaps(for: side, capturedRoom: capturedRoom, frame: frame)
             for (index, gap) in gaps.enumerated() {
-                let (cornerA, cornerB) = cornerPoints(for: side, start: gap.start, end: gap.end, frame: frame)
+                let (cornerA, cornerB) = legacyCornerPoints(for: side, start: gap.start, end: gap.end, frame: frame)
                 walls.append(RoomFitWall(
-                    id: "gap-fill-\(side.rawValue)-\(index)",
+                    id: "legacy-gap-fill-\(side.rawValue)-\(index)",
                     start: RoomFitPosition(x: roundedOffset(cornerA.x), z: roundedOffset(cornerA.z)),
                     end: RoomFitPosition(x: roundedOffset(cornerB.x), z: roundedOffset(cornerB.z)),
                     height: roundedOffset(wallHeight),
@@ -1260,7 +1430,10 @@ private struct RoomFitPosition: Codable {
 private struct RoomFitOpening: Codable {
     let id: String
     let type: String
+    /// The id of the `RoomFitWall` this opening is cut into (not a cardinal
+    /// side) — any wall in the room's perimeter can host a door/window.
     let wall: String
+    /// Distance in meters from that wall's own `start` toward `end`.
     let offset: Double
     let width: Double
     let height: Double

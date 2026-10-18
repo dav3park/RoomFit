@@ -59,6 +59,8 @@ enum RoomFitFurnitureType: String, CaseIterable {
 
     // 고정설비: 카탈로그 상품이 아니라 옮길 수 없는 장애물. 백엔드는 배치·피드백에서 이동/삭제하지 않는다.
     case upperCabinet = "upper_cabinet"
+    /// 싱크대·가스레인지가 올라앉은 붙박이 하부장(조리대). RoomPlan은 이걸 .storage로 잡는다.
+    case baseCabinet = "base_cabinet"
     case sink
     case stove
     case oven
@@ -79,11 +81,15 @@ enum RoomFitFurnitureType: String, CaseIterable {
         }
     }
 
-    /// 바닥에서 떠 있는 채로 벽에 붙는 타입. 업로드 시 mount=WALL + elevation을 같이 보낸다 —
-    /// 백엔드가 높이가 겹치지 않는 바닥 가구와 충돌로 판정하지 않게 하기 위해서.
-    var isWallMounted: Bool {
-        self == .upperCabinet || self == .tv
+    /// 바닥에서 떠 있는 물건인지. 업로드 시 mount=WALL + elevation을 같이 보낸다 — 백엔드 WALL은
+    /// "바닥에서 elevation만큼 떠 있음"이라는 뜻이라, 높이가 겹치지 않는 아래 가구와 충돌로 보지 않는다.
+    /// 상부장·TV는 항상, 고정설비는 조리대에 박힌 싱크대·가스레인지처럼 실제로 떠 있을 때만.
+    func isFloating(elevation: Double) -> Bool {
+        if self == .upperCabinet || self == .tv { return true }
+        return isFixture && elevation > Self.floatingThreshold
     }
+
+    static let floatingThreshold = 0.3
 
     var koreanLabel: String {
         switch self {
@@ -98,6 +104,7 @@ enum RoomFitFurnitureType: String, CaseIterable {
         case .drawerChest: return "서랍장"
         case .hanger: return "행거"
         case .upperCabinet: return "상부장"
+        case .baseCabinet: return "하부장"
         case .sink: return "싱크대"
         case .stove: return "가스레인지"
         case .oven: return "오븐"
@@ -117,7 +124,8 @@ enum RoomFitFurnitureType: String, CaseIterable {
         _ category: CapturedRoom.Object.Category,
         height: Double,
         footprintDepth: Double,
-        elevation: Double
+        elevation: Double,
+        underCountertopAppliance: Bool = false
     ) -> RoomFitFurnitureType? {
         switch category {
         case .bed: return .bed
@@ -127,6 +135,9 @@ enum RoomFitFurnitureType: String, CaseIterable {
         case .television: return .tv
         case .storage:
             if elevation > 0.8 { return .upperCabinet }
+            // 위에 싱크대·가스레인지가 얹혀 있으면 서랍장이 아니라 주방 하부장이다 — 옮길 수 있는
+            // 서랍장으로 보내면 백엔드가 싱크대와 겹친다며 다른 곳으로 재배치해 버린다.
+            if underCountertopAppliance { return .baseCabinet }
             if height > 1.6 && footprintDepth > 0.5 { return .wardrobe }
             if footprintDepth < 0.45 || height > 1.2 { return .bookshelf }
             return .drawerChest
@@ -1294,31 +1305,65 @@ final class RoomScanController: NSObject, ObservableObject {
         let roomWidth = roundedOffset(frame.width)
         let roomDepth = roundedOffset(frame.depth)
 
-        return capturedRoom.objects.compactMap { object -> RoomFitFurniture? in
+        // 1차: 모든 물체의 방 기준 위치·평면 크기·바닥에서 뜬 높이를 먼저 구한다. 수납장 분류에
+        // "위에 싱크대·가스레인지가 있는가"가 필요해서 한 번에 분류할 수 없다.
+        struct ScannedObject {
+            let object: CapturedRoom.Object
+            let height: Double
+            let elevation: Double
+            let corner: (x: Double, z: Double)
+            let rotation: Double
+            let footprint: (width: Double, depth: Double)
+        }
+        let scanned = capturedRoom.objects.map { object -> ScannedObject in
             let height = Double(abs(object.dimensions.y))
-            // 바닥(frame.originY)에서 가구 밑면까지. 상부장/TV처럼 떠 있는 물건을 구분하고,
-            // 벽걸이로 보낼 때 백엔드가 천장 초과로 거부하지 않게 방 높이 안으로 자른다.
+            // 바닥(frame.originY)에서 가구 밑면까지. 떠 있는 물건으로 보낼 때 백엔드가 천장 초과로
+            // 거부하지 않게 방 높이 안으로 자른다.
             let rawElevation = Double(object.transform.columns.3.y) - height / 2 - frame.originY
-            let elevation = min(max(rawElevation, 0), max(roomHeight - height, 0))
+            let rotation = localRotationDegrees(from: object.transform, frame: frame)
+            return ScannedObject(
+                object: object,
+                height: height,
+                elevation: min(max(rawElevation, 0), max(roomHeight - height, 0)),
+                corner: cornerCoordinates(
+                    worldX: Double(object.transform.columns.3.x),
+                    worldZ: Double(object.transform.columns.3.z),
+                    frame: frame
+                ),
+                rotation: rotation,
+                footprint: worldAlignedFootprint(
+                    rawWidth: Double(object.dimensions.x),
+                    rawDepth: Double(object.dimensions.z),
+                    rotationDegrees: rotation
+                )
+            )
+        }
+        let countertopAppliances = scanned.filter {
+            [.sink, .stove].contains($0.object.category) && $0.elevation > RoomFitFurnitureType.floatingThreshold
+        }
+        func overlapsInPlan(_ a: ScannedObject, _ b: ScannedObject) -> Bool {
+            abs(a.corner.x - b.corner.x) < (a.footprint.width + b.footprint.width) / 2
+                && abs(a.corner.z - b.corner.z) < (a.footprint.depth + b.footprint.depth) / 2
+        }
+
+        return scanned.compactMap { item -> RoomFitFurniture? in
+            let object = item.object
+            let height = item.height
+            let elevation = item.elevation
             let footprintDepth = Double(min(abs(object.dimensions.x), abs(object.dimensions.z)))
             guard let type = RoomFitFurnitureType.classify(
-                object.category, height: height, footprintDepth: footprintDepth, elevation: elevation
+                object.category, height: height, footprintDepth: footprintDepth, elevation: elevation,
+                underCountertopAppliance: object.category == .storage
+                    && countertopAppliances.contains { overlapsInPlan($0, item) }
             ) else {
                 logDebug("[RoomFit] skipped unsupported RoomPlan category \(object.category)")
                 return nil
             }
 
-            let corner = cornerCoordinates(
-                worldX: Double(object.transform.columns.3.x),
-                worldZ: Double(object.transform.columns.3.z),
-                frame: frame
-            )
-            let rotation = localRotationDegrees(from: object.transform, frame: frame)
-            let footprint = worldAlignedFootprint(
-                rawWidth: Double(object.dimensions.x),
-                rawDepth: Double(object.dimensions.z),
-                rotationDegrees: rotation
-            )
+            let corner = item.corner
+            let rotation = item.rotation
+            let footprint = item.footprint
+            let floating = type.isFloating(elevation: elevation)
             let roundedWidth = roundedOffset(footprint.width)
             let roundedDepth = roundedOffset(footprint.depth)
             let clampedPosition = clampFootprintCenter(
@@ -1345,8 +1390,8 @@ final class RoomScanController: NSObject, ObservableObject {
                 position: RoomFitPosition(x: roundedOffset(clampedPosition.x), z: roundedOffset(clampedPosition.z)),
                 rotation: rotation,
                 status: "EXISTING",
-                mount: type.isWallMounted ? "WALL" : nil,
-                elevation: type.isWallMounted ? roundedOffset(elevation) : nil
+                mount: floating ? "WALL" : nil,
+                elevation: floating ? roundedOffset(elevation) : nil
             )
         }
     }

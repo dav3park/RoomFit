@@ -91,6 +91,13 @@ enum RoomFitFurnitureType: String, CaseIterable {
 
     static let floatingThreshold = 0.3
 
+    /// RoomPlan은 소형 냉장고를 자주 .storage로 잡는다. 서랍장·책장보다 깊고 평면이 정사각형에
+    /// 가까운 게 특징이라, 주방 근처에 있을 때만 이 모양을 냉장고로 본다.
+    static func looksLikeRefrigerator(height: Double, width: Double, depth: Double) -> Bool {
+        let short = min(width, depth), long = max(width, depth)
+        return (0.8...2.1).contains(height) && short >= 0.5 && long <= 0.75 && long / short <= 1.2
+    }
+
     var koreanLabel: String {
         switch self {
         case .bed: return "침대"
@@ -125,7 +132,9 @@ enum RoomFitFurnitureType: String, CaseIterable {
         height: Double,
         footprintDepth: Double,
         elevation: Double,
-        underCountertopAppliance: Bool = false
+        footprintWidth: Double = 0,
+        underCountertopAppliance: Bool = false,
+        nearKitchen: Bool = false
     ) -> RoomFitFurnitureType? {
         switch category {
         case .bed: return .bed
@@ -138,6 +147,9 @@ enum RoomFitFurnitureType: String, CaseIterable {
             // 위에 싱크대·가스레인지가 얹혀 있으면 서랍장이 아니라 주방 하부장이다 — 옮길 수 있는
             // 서랍장으로 보내면 백엔드가 싱크대와 겹친다며 다른 곳으로 재배치해 버린다.
             if underCountertopAppliance { return .baseCabinet }
+            if nearKitchen && looksLikeRefrigerator(height: height, width: footprintWidth, depth: footprintDepth) {
+                return .refrigerator
+            }
             if height > 1.6 && footprintDepth > 0.5 { return .wardrobe }
             if footprintDepth < 0.45 || height > 1.2 { return .bookshelf }
             return .drawerChest
@@ -1345,6 +1357,17 @@ final class RoomScanController: NSObject, ObservableObject {
             abs(a.corner.x - b.corner.x) < (a.footprint.width + b.footprint.width) / 2
                 && abs(a.corner.z - b.corner.z) < (a.footprint.depth + b.footprint.depth) / 2
         }
+        /// 두 물체 평면 사각형 사이 가장 가까운 거리(겹치면 0).
+        func planGap(_ a: ScannedObject, _ b: ScannedObject) -> Double {
+            let dx = max(0, abs(a.corner.x - b.corner.x) - (a.footprint.width + b.footprint.width) / 2)
+            let dz = max(0, abs(a.corner.z - b.corner.z) - (a.footprint.depth + b.footprint.depth) / 2)
+            return (dx * dx + dz * dz).squareRoot()
+        }
+        // 주방이라는 증거: 조리·세척 설비와, 그 설비가 얹힌 하부장.
+        let kitchenAnchors = scanned.filter { item in
+            [.sink, .stove, .oven, .dishwasher].contains(item.object.category)
+                || (item.object.category == .storage && countertopAppliances.contains { overlapsInPlan($0, item) })
+        }
 
         return scanned.compactMap { item -> RoomFitFurniture? in
             let object = item.object
@@ -1353,8 +1376,11 @@ final class RoomScanController: NSObject, ObservableObject {
             let footprintDepth = Double(min(abs(object.dimensions.x), abs(object.dimensions.z)))
             guard let type = RoomFitFurnitureType.classify(
                 object.category, height: height, footprintDepth: footprintDepth, elevation: elevation,
+                footprintWidth: Double(max(abs(object.dimensions.x), abs(object.dimensions.z))),
                 underCountertopAppliance: object.category == .storage
-                    && countertopAppliances.contains { overlapsInPlan($0, item) }
+                    && countertopAppliances.contains { overlapsInPlan($0, item) },
+                nearKitchen: object.category == .storage && item.elevation < RoomFitFurnitureType.floatingThreshold
+                    && kitchenAnchors.contains { $0.object.identifier != object.identifier && planGap($0, item) <= 1.2 }
             ) else {
                 logDebug("[RoomFit] skipped unsupported RoomPlan category \(object.category)")
                 return nil

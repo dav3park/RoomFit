@@ -41,6 +41,110 @@ enum SampleRoomKind: CaseIterable, Identifiable, Equatable {
     }
 }
 
+/// 업로드 JSON의 furniture.type 값. rawValue는 백엔드 canonical 타입과 1:1로 맞춘다
+/// (가구는 furniture-catalog.json의 typeAliases, 고정설비는 백엔드 FixtureType.code).
+enum RoomFitFurnitureType: String, CaseIterable {
+    // 카탈로그 가구
+    case bed
+    case desk
+    case multiTable = "multi_table"
+    case deskChair = "desk_chair"
+    case sofa
+    case tv
+    case wardrobe
+    case bookshelf
+    case drawerChest = "drawer_chest"
+    /// RoomPlan이 못 잡는 타입 — 스캔 후 수동 수정 UI에서만 고를 수 있게 남겨둔다.
+    case hanger
+
+    // 고정설비: 카탈로그 상품이 아니라 옮길 수 없는 장애물. 백엔드는 배치·피드백에서 이동/삭제하지 않는다.
+    case upperCabinet = "upper_cabinet"
+    case sink
+    case stove
+    case oven
+    case refrigerator
+    case dishwasher
+    case washerDryer = "washer_dryer"
+    case toilet
+    case bathtub
+    case fireplace
+    case stairs
+
+    var isFixture: Bool {
+        switch self {
+        case .bed, .desk, .multiTable, .deskChair, .sofa, .tv, .wardrobe, .bookshelf, .drawerChest, .hanger:
+            return false
+        default:
+            return true
+        }
+    }
+
+    /// 바닥에서 떠 있는 채로 벽에 붙는 타입. 업로드 시 mount=WALL + elevation을 같이 보낸다 —
+    /// 백엔드가 높이가 겹치지 않는 바닥 가구와 충돌로 판정하지 않게 하기 위해서.
+    var isWallMounted: Bool {
+        self == .upperCabinet || self == .tv
+    }
+
+    var koreanLabel: String {
+        switch self {
+        case .bed: return "침대"
+        case .desk: return "책상"
+        case .multiTable: return "테이블"
+        case .deskChair: return "의자"
+        case .sofa: return "소파"
+        case .tv: return "TV"
+        case .wardrobe: return "옷장"
+        case .bookshelf: return "책장"
+        case .drawerChest: return "서랍장"
+        case .hanger: return "행거"
+        case .upperCabinet: return "상부장"
+        case .sink: return "싱크대"
+        case .stove: return "가스레인지"
+        case .oven: return "오븐"
+        case .refrigerator: return "냉장고"
+        case .dishwasher: return "식기세척기"
+        case .washerDryer: return "세탁기"
+        case .toilet: return "변기"
+        case .bathtub: return "욕조"
+        case .fireplace: return "벽난로"
+        case .stairs: return "계단"
+        }
+    }
+
+    /// RoomPlan 카테고리 + 스캔된 치수로 타입을 고른다. `.table`/`.storage`는 하나의 카테고리에
+    /// 여러 가구가 섞여 있어서 높이·깊이·바닥에서 뜬 높이(elevation)로 세분화한다.
+    static func classify(
+        _ category: CapturedRoom.Object.Category,
+        height: Double,
+        footprintDepth: Double,
+        elevation: Double
+    ) -> RoomFitFurnitureType? {
+        switch category {
+        case .bed: return .bed
+        case .table: return height < 0.6 ? .multiTable : .desk
+        case .chair: return .deskChair
+        case .sofa: return .sofa
+        case .television: return .tv
+        case .storage:
+            if elevation > 0.8 { return .upperCabinet }
+            if height > 1.6 && footprintDepth > 0.5 { return .wardrobe }
+            if footprintDepth < 0.45 || height > 1.2 { return .bookshelf }
+            return .drawerChest
+        case .sink: return .sink
+        case .stove: return .stove
+        case .oven: return .oven
+        case .refrigerator: return .refrigerator
+        case .dishwasher: return .dishwasher
+        case .washerDryer: return .washerDryer
+        case .toilet: return .toilet
+        case .bathtub: return .bathtub
+        case .fireplace: return .fireplace
+        case .stairs: return .stairs
+        @unknown default: return nil
+        }
+    }
+}
+
 @MainActor
 final class RoomScanController: NSObject, ObservableObject {
     @Published var isScanning = false
@@ -219,19 +323,19 @@ final class RoomScanController: NSObject, ObservableObject {
             furniture = []
         case .furnished:
             furniture = [
-                RoomFitFurniture(id: "sample-bed", type: "bed", label: "침대",
+                RoomFitFurniture(id: "sample-bed", type: RoomFitFurnitureType.bed.rawValue, label: "침대",
                                   width: 1.0, depth: 1.96, height: 0.55,
                                   position: RoomFitPosition(x: 2.78, z: 1.17), rotation: 0, status: "EXISTING"),
-                RoomFitFurniture(id: "sample-desk-1", type: "desk", label: "책상",
+                RoomFitFurniture(id: "sample-desk-1", type: RoomFitFurnitureType.desk.rawValue, label: "책상",
                                   width: 1.3, depth: 0.66, height: 0.73,
                                   position: RoomFitPosition(x: 1.59, z: 0.45), rotation: 0, status: "EXISTING"),
-                RoomFitFurniture(id: "sample-desk-2", type: "desk", label: "책상",
+                RoomFitFurniture(id: "sample-desk-2", type: RoomFitFurnitureType.desk.rawValue, label: "책상",
                                   width: 0.58, depth: 0.84, height: 0.38,
                                   position: RoomFitPosition(x: 1.58, z: 1.8), rotation: 90, status: "EXISTING"),
-                RoomFitFurniture(id: "sample-chair", type: "chair", label: "의자",
+                RoomFitFurniture(id: "sample-chair", type: RoomFitFurnitureType.deskChair.rawValue, label: "의자",
                                   width: 0.56, depth: 0.58, height: 0.73,
                                   position: RoomFitPosition(x: 1.59, z: 0.63), rotation: 180, status: "EXISTING"),
-                RoomFitFurniture(id: "sample-storage", type: "storage", label: "수납장",
+                RoomFitFurniture(id: "sample-storage", type: RoomFitFurnitureType.wardrobe.rawValue, label: "옷장",
                                   width: 1.05, depth: 0.64, height: 1.82,
                                   position: RoomFitPosition(x: 2.8, z: 3.05), rotation: 180, status: "EXISTING")
             ]
@@ -643,7 +747,7 @@ final class RoomScanController: NSObject, ObservableObject {
         )
         let walls = extractWalls(from: capturedRoom, frame: frame)
         let openings = extractOpenings(from: capturedRoom, frame: frame, walls: walls)
-        let furniture = extractFurniture(from: capturedRoom, frame: frame)
+        let furniture = extractFurniture(from: capturedRoom, frame: frame, roomHeight: room.height)
 
         appendRoomSummary(room: room, walls: walls, openings: openings, furniture: furniture)
         lastDebugInfo = debugLogLines.joined(separator: "\n")
@@ -1179,7 +1283,7 @@ final class RoomScanController: NSObject, ObservableObject {
 
     // MARK: - Furniture
 
-    private func extractFurniture(from capturedRoom: CapturedRoom, frame: RoomReferenceFrame?) -> [RoomFitFurniture] {
+    private func extractFurniture(from capturedRoom: CapturedRoom, frame: RoomReferenceFrame?, roomHeight: Double) -> [RoomFitFurniture] {
         guard let frame else { return [] }
 
         // Clamping must happen against the *rounded* numbers that actually get
@@ -1191,7 +1295,18 @@ final class RoomScanController: NSObject, ObservableObject {
         let roomDepth = roundedOffset(frame.depth)
 
         return capturedRoom.objects.compactMap { object -> RoomFitFurniture? in
-            guard let type = mapCategory(object.category) else { return nil }
+            let height = Double(abs(object.dimensions.y))
+            // 바닥(frame.originY)에서 가구 밑면까지. 상부장/TV처럼 떠 있는 물건을 구분하고,
+            // 벽걸이로 보낼 때 백엔드가 천장 초과로 거부하지 않게 방 높이 안으로 자른다.
+            let rawElevation = Double(object.transform.columns.3.y) - height / 2 - frame.originY
+            let elevation = min(max(rawElevation, 0), max(roomHeight - height, 0))
+            let footprintDepth = Double(min(abs(object.dimensions.x), abs(object.dimensions.z)))
+            guard let type = RoomFitFurnitureType.classify(
+                object.category, height: height, footprintDepth: footprintDepth, elevation: elevation
+            ) else {
+                logDebug("[RoomFit] skipped unsupported RoomPlan category \(object.category)")
+                return nil
+            }
 
             let corner = cornerCoordinates(
                 worldX: Double(object.transform.columns.3.x),
@@ -1213,7 +1328,7 @@ final class RoomScanController: NSObject, ObservableObject {
             )
             if abs(clampedPosition.x - corner.x) > 0.001 || abs(clampedPosition.z - corner.z) > 0.001 {
                 logDebug(
-                    "[RoomFit] clamped \(koreanLabel(for: type)) (\(object.identifier.uuidString.prefix(8))) "
+                    "[RoomFit] clamped \(type.koreanLabel) (\(object.identifier.uuidString.prefix(8))) "
                         + "position (\(roundedOffset(corner.x)), \(roundedOffset(corner.z))) -> "
                         + "(\(roundedOffset(clampedPosition.x)), \(roundedOffset(clampedPosition.z))) "
                         + "to stay inside room bounds"
@@ -1222,14 +1337,16 @@ final class RoomScanController: NSObject, ObservableObject {
 
             return RoomFitFurniture(
                 id: object.identifier.uuidString,
-                type: type,
-                label: koreanLabel(for: type),
+                type: type.rawValue,
+                label: type.koreanLabel,
                 width: roundedWidth,
                 depth: roundedDepth,
-                height: roundedOffset(Double(object.dimensions.y)),
+                height: roundedOffset(height),
                 position: RoomFitPosition(x: roundedOffset(clampedPosition.x), z: roundedOffset(clampedPosition.z)),
                 rotation: rotation,
-                status: "EXISTING"
+                status: "EXISTING",
+                mount: type.isWallMounted ? "WALL" : nil,
+                elevation: type.isWallMounted ? roundedOffset(elevation) : nil
             )
         }
     }
@@ -1276,29 +1393,6 @@ final class RoomScanController: NSObject, ObservableObject {
         let isPerpendicular = positiveNormalized > 45 && positiveNormalized < 135
 
         return isPerpendicular ? (rawDepth, rawWidth) : (rawWidth, rawDepth)
-    }
-
-    /// MVP backend only supports bed/desk/chair/storage/rug/lamp; RoomPlan categories
-    /// with no equivalent (sofa, TV, fireplace, bathtub, toilet, sink, washer/dryer,
-    /// refrigerator, oven, dishwasher, stove, stairs) are dropped from the scan result.
-    private func mapCategory(_ category: CapturedRoom.Object.Category) -> String? {
-        switch category {
-        case .bed:     return "bed"
-        case .table:   return "desk"
-        case .chair:   return "chair"
-        case .storage: return "storage"
-        default:       return nil
-        }
-    }
-
-    private func koreanLabel(for type: String) -> String {
-        switch type {
-        case "bed":     return "침대"
-        case "desk":    return "책상"
-        case "chair":   return "의자"
-        case "storage": return "수납장"
-        default:        return type
-        }
     }
 
     // MARK: - Room dimensions
@@ -1450,4 +1544,7 @@ private struct RoomFitFurniture: Codable {
     let position: RoomFitPosition
     let rotation: Double
     let status: String
+    /// "WALL"이면 바닥에서 elevation(m)만큼 떠 있다. nil이면 FLOOR — JSON에서 생략된다.
+    var mount: String? = nil
+    var elevation: Double? = nil
 }

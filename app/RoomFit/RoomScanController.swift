@@ -134,7 +134,8 @@ enum RoomFitFurnitureType: String, CaseIterable {
         elevation: Double,
         footprintWidth: Double = 0,
         underCountertopAppliance: Bool = false,
-        nearKitchen: Bool = false
+        nearKitchen: Bool = false,
+        chairTuckedUnder: Bool = false
     ) -> RoomFitFurnitureType? {
         switch category {
         case .bed: return .bed
@@ -147,6 +148,9 @@ enum RoomFitFurnitureType: String, CaseIterable {
             // 위에 싱크대·가스레인지가 얹혀 있으면 서랍장이 아니라 주방 하부장이다 — 옮길 수 있는
             // 서랍장으로 보내면 백엔드가 싱크대와 겹친다며 다른 곳으로 재배치해 버린다.
             if underCountertopAppliance { return .baseCabinet }
+            // 의자가 아래로 들어가 있는 "수납장"은 책상(위에 선반이 달린 책상 등)이다. 수납장으로 보내면
+            // 의자와 겹친다며 업로드 때 다른 곳으로 옮겨진다.
+            if chairTuckedUnder { return .desk }
             if nearKitchen && looksLikeRefrigerator(height: height, width: footprintWidth, depth: footprintDepth) {
                 return .refrigerator
             }
@@ -1380,7 +1384,9 @@ final class RoomScanController: NSObject, ObservableObject {
                 underCountertopAppliance: object.category == .storage
                     && countertopAppliances.contains { overlapsInPlan($0, item) },
                 nearKitchen: object.category == .storage && item.elevation < RoomFitFurnitureType.floatingThreshold
-                    && kitchenAnchors.contains { $0.object.identifier != object.identifier && planGap($0, item) <= 1.2 }
+                    && kitchenAnchors.contains { $0.object.identifier != object.identifier && planGap($0, item) <= 1.2 },
+                chairTuckedUnder: object.category == .storage && item.elevation < RoomFitFurnitureType.floatingThreshold
+                    && scanned.contains { $0.object.category == .chair && overlapsInPlan($0, item) }
             ) else {
                 logDebug("[RoomFit] skipped unsupported RoomPlan category \(object.category)")
                 return nil

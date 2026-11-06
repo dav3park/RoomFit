@@ -1,0 +1,31 @@
+spring:
+  application:
+    name: roomfit-backend
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 16MB
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:h2:file:./data/roomfit;AUTO_SERVER=TRUE}
+    username: ${SPRING_DATASOURCE_USERNAME:sa}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+
+server:
+  port: ${PORT:10000}
+
+roomfit:
+  llm:
+    feedback:
+      enabled: ${ROOMFIT_LLM_FEEDBACK_ENABLED:false}
+      api-key: ${ROOMFIT_LLM_FEEDBACK_API_KEY:}
+      base-url: ${ROOMFIT_LLM_FEEDBACK_BASE_URL:}
+      model: ${ROOMFIT_LLM_FEEDBACK_MODEL:}
+      timeout-ms: ${ROOMFIT_LLM_FEEDBACK_TIMEOUT_MS:0}
+  client-scope:
+    # Header-less RoomPlan/Web clients stay in the legacy scope while they migrate.
+    enabled: ${ROOMFIT_CLIENT_SCOPE_ENABLED:true}
+    required: ${ROOMFIT_CLIENT_SCOPE_REQUIRED:false}

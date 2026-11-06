@@ -1,0 +1,152 @@
+package com.roomfit.agent.service;
+
+import com.roomfit.agent.domain.AgentContext;
+import com.roomfit.agent.domain.DesignStyle;
+import com.roomfit.agent.domain.LifestyleGoal;
+import com.roomfit.agent.domain.PreferredColorTone;
+import com.roomfit.agent.dto.request.AgentContextRequest;
+import com.roomfit.agent.dto.response.AgentContextResponse;
+import com.roomfit.agent.repository.AgentContextRepository;
+import com.roomfit.common.CustomException;
+import com.roomfit.common.ErrorCode;
+import com.roomfit.product.domain.MockProduct;
+import com.roomfit.product.catalog.GeneratedFurnitureCatalog;
+import com.roomfit.product.service.MockProductService;
+import com.roomfit.room.RoomAccessService;
+import com.roomfit.style.domain.StyleImage;
+import com.roomfit.style.repository.StyleImageRepository;
+import org.springframework.stereotype.Service;
+
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+@Service
+public class AgentContextService {
+
+    private final AgentContextRepository agentContextRepository;
+    private final RoomAccessService roomAccessService;
+    private final StyleImageRepository styleImageRepository;
+    private final MockProductService mockProductService;
+
+    public AgentContextService(AgentContextRepository agentContextRepository,
+                               RoomAccessService roomAccessService,
+                               StyleImageRepository styleImageRepository,
+                               MockProductService mockProductService) {
+        this.agentContextRepository = agentContextRepository;
+        this.roomAccessService = roomAccessService;
+        this.styleImageRepository = styleImageRepository;
+        this.mockProductService = mockProductService;
+    }
+
+    public AgentContextResponse createContext(AgentContextRequest request) {
+        roomAccessService.findWritableRoom(request.getRoomId());
+
+        if (request.getRequiredItems() == null || request.getRequiredItems().isEmpty()) {
+            throw new CustomException(ErrorCode.REQUIRED_ITEM_EMPTY);
+        }
+        if (request.getSelectedImageIds() == null || request.getSelectedImageIds().isEmpty()) {
+            throw new CustomException(ErrorCode.STYLE_IMAGE_EMPTY);
+        }
+
+        LifestyleGoal lifestyleGoal = parseLifestyleGoal(request.getLifestyleGoal());
+        List<DesignStyle> designStyles = parseDesignStyles(request.getDesignStyle());
+        List<String> requiredItems = validateFurnitureTypes(request.getRequiredItems());
+        List<String> optionalItems = validateFurnitureTypes(nullToEmpty(request.getOptionalItems()));
+        List<Long> selectedImageIds = List.copyOf(request.getSelectedImageIds());
+        List<String> selectedProductIds = nullToEmpty(request.getSelectedProductIds());
+        PreferredColorTone preferredColorTone = parsePreferredColorTone(request.getPreferredColorTone());
+
+        List<StyleImage> selectedImages = selectedImageIds.stream()
+                .map(imageId -> styleImageRepository.findById(imageId)
+                        .orElseThrow(() -> new CustomException(ErrorCode.STYLE_IMAGE_NOT_FOUND)))
+                .toList();
+
+        List<MockProduct> selectedProducts = mockProductService.findByProductIds(selectedProductIds);
+
+        List<String> styleTags = collectStyleTags(selectedImages, selectedProducts);
+
+        AgentContext context = new AgentContext(
+                request.getRoomId(),
+                lifestyleGoal,
+                designStyles,
+                requiredItems,
+                optionalItems,
+                selectedImageIds,
+                selectedProductIds,
+                styleTags,
+                preferredColorTone
+        );
+
+        agentContextRepository.save(context);
+        return AgentContextResponse.from(context, selectedProducts);
+    }
+
+    private LifestyleGoal parseLifestyleGoal(String rawLifestyleGoal) {
+        try {
+            return LifestyleGoal.valueOf(rawLifestyleGoal);
+        } catch (IllegalArgumentException | NullPointerException e) {
+            throw new CustomException(ErrorCode.INVALID_LIFESTYLE_GOAL);
+        }
+    }
+
+    private List<DesignStyle> parseDesignStyles(List<String> rawDesignStyles) {
+        if (rawDesignStyles == null) {
+            throw new CustomException(ErrorCode.INVALID_DESIGN_STYLE);
+        }
+        try {
+            return rawDesignStyles.stream()
+                    .map(DesignStyle::valueOf)
+                    .toList();
+        } catch (IllegalArgumentException | NullPointerException e) {
+            throw new CustomException(ErrorCode.INVALID_DESIGN_STYLE);
+        }
+    }
+
+    private PreferredColorTone parsePreferredColorTone(String rawPreferredColorTone) {
+        if (rawPreferredColorTone == null || rawPreferredColorTone.isBlank()) {
+            return null;
+        }
+        try {
+            return PreferredColorTone.valueOf(rawPreferredColorTone);
+        } catch (IllegalArgumentException e) {
+            throw new CustomException(ErrorCode.INVALID_PREFERRED_COLOR_TONE);
+        }
+    }
+
+    private List<String> validateFurnitureTypes(List<String> furnitureTypes) {
+        Set<String> supportedTypes = GeneratedFurnitureCatalog.get().products().stream()
+                .map(MockProduct::getType)
+                .collect(Collectors.toSet());
+        // Kept for the established legacy storage renderer; all new catalog
+        // types are supplied dynamically above.
+        supportedTypes.add("storage");
+        List<String> normalized = new ArrayList<>();
+        for (String furnitureType : furnitureTypes) {
+            String canonicalType = GeneratedFurnitureCatalog.get().normalizeType(furnitureType);
+            if (canonicalType == null || !supportedTypes.contains(canonicalType)) {
+                throw new CustomException(ErrorCode.INVALID_FURNITURE_TYPE);
+            }
+            // Preserve the public request value for compatibility (for example
+            // "chair"), while the placement engine normalizes it internally.
+            normalized.add(furnitureType.trim());
+        }
+        return List.copyOf(normalized);
+    }
+
+    private <T> List<T> nullToEmpty(List<T> values) {
+        if (values == null) {
+            return List.of();
+        }
+        return List.copyOf(values);
+    }
+
+    private List<String> collectStyleTags(List<StyleImage> selectedImages, List<MockProduct> selectedProducts) {
+        Set<String> tags = new LinkedHashSet<>();
+        selectedImages.forEach(image -> tags.addAll(image.getTags()));
+        selectedProducts.forEach(product -> tags.addAll(product.getStyleTags()));
+        return new ArrayList<>(tags);
+    }
+}

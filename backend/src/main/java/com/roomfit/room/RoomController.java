@@ -1,0 +1,154 @@
+package com.roomfit.room;
+
+import com.roomfit.common.CommonResponse;
+import com.roomfit.room.dto.FurnitureUpdateRequest;
+import com.roomfit.room.dto.RoomFurnitureReplaceRequest;
+import com.roomfit.room.dto.RoomResponse;
+import com.roomfit.room.dto.RoomUploadRequest;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.ExampleObject;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+
+@RestController
+@RequestMapping("/api/rooms")
+@Tag(name = "Rooms", description = "방 조회, RoomPlan 업로드, 기존 가구 상태 수정 API")
+public class RoomController {
+
+    private final RoomService roomService;
+
+    public RoomController(RoomService roomService) {
+        this.roomService = roomService;
+    }
+
+    @GetMapping("/samples")
+    @Operation(summary = "샘플 방 목록 조회", description = "데모 시작 시 사용할 샘플 방 목록을 조회합니다.")
+    @ApiResponse(responseCode = "200", description = "샘플 방 목록 조회 성공")
+    public CommonResponse<List<RoomResponse>> getSampleRooms() {
+        return CommonResponse.ok(roomService.getSampleRooms());
+    }
+
+    @GetMapping("/uploads/recent")
+    @Operation(summary = "최근 업로드 방 목록 조회", description = "iOS App에서 업로드한 ROOMPLAN 방을 최신 생성순으로 조회합니다. 업로드 방이 없으면 빈 배열을 반환합니다.")
+    @ApiResponse(responseCode = "200", description = "최근 업로드 방 목록 조회 성공")
+    public CommonResponse<List<RoomResponse>> getRecentUploadedRooms(
+            @RequestParam(defaultValue = "10") int limit) {
+        return CommonResponse.ok(roomService.getRecentUploadedRooms(limit));
+    }
+
+    @DeleteMapping("/uploads/{roomId}")
+    @Operation(summary = "업로드 방 삭제", description = "iOS App에서 업로드한 ROOMPLAN 방만 삭제합니다. 샘플 방은 삭제할 수 없습니다.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "업로드 방 삭제 성공"),
+            @ApiResponse(responseCode = "403", description = "ROOMPLAN 업로드 방이 아닌 경우"),
+            @ApiResponse(responseCode = "404", description = "존재하지 않는 roomId")
+    })
+    public CommonResponse<Void> deleteUploadedRoom(@PathVariable Long roomId) {
+        roomService.deleteUploadedRoom(roomId);
+        return CommonResponse.ok(null);
+    }
+
+    @GetMapping("/{roomId}")
+    @Operation(summary = "특정 방 조회", description = "roomId 기준으로 방 크기, 문/창문, 기존 가구 목록을 조회합니다. 프론트는 이 응답을 기준으로 방을 렌더링합니다.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "방 조회 성공"),
+            @ApiResponse(responseCode = "404", description = "존재하지 않는 roomId")
+    })
+    public CommonResponse<RoomResponse> getRoom(@PathVariable Long roomId) {
+        return CommonResponse.ok(roomService.getRoom(roomId));
+    }
+
+    @PostMapping("/upload")
+    @ResponseStatus(HttpStatus.CREATED)
+    @Operation(summary = "RoomPlan JSON 업로드", description = "iOS RoomPlan App 또는 Mock/Manual 입력에서 생성한 RoomFit JSON을 백엔드에 저장하고 roomId를 발급합니다. 업로드된 방은 GET /api/rooms/{roomId}로 조회할 수 있습니다. 응답의 name은 백엔드가 부여하는 방 표시 이름이며, 프론트는 name을 고정 문자열로 가정하지 말고 응답값을 그대로 표시해야 합니다.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "RoomFit JSON 업로드 성공",
+                    content = @Content(examples = @ExampleObject(name = "Uploaded room response", value = """
+                            {
+                              "success": true,
+                              "data": {
+                                "roomId": 3,
+                                "name": "RoomPlan Scan Room",
+                                "room": {
+                                  "width": 3.2,
+                                  "depth": 4.5,
+                                  "height": 2.4,
+                                  "unit": "meter"
+                                },
+                                "openings": [],
+                                "furniture": [],
+                                "source": "ROOMPLAN",
+                                "createdAt": "2026-07-09T02:13:15.411289"
+                              },
+                              "error": null
+                            }
+                            """))),
+            @ApiResponse(responseCode = "400", description = "잘못된 방 크기, 문/창문 데이터, 가구 위치 또는 요청 본문")
+    })
+    @io.swagger.v3.oas.annotations.parameters.RequestBody(
+            description = "RoomPlan 또는 Mock/Manual 입력에서 생성한 RoomFit JSON",
+            required = true,
+            content = @Content(examples = @ExampleObject(name = "Mock Room upload", value = """
+                    {
+                      "name": "RoomPlan Scan Room",
+                      "room": {
+                        "width": 3.2,
+                        "depth": 4.5,
+                        "height": 2.4,
+                        "unit": "meter"
+                      },
+                      "openings": [],
+                      "furniture": []
+                    }
+                    """)))
+    public CommonResponse<RoomResponse> uploadRoom(@RequestBody RoomUploadRequest request) {
+        return CommonResponse.ok(roomService.uploadRoom(request));
+    }
+
+    @PostMapping("/{roomId}/copy")
+    @ResponseStatus(HttpStatus.CREATED)
+    @Operation(summary = "샘플 방 복제", description = "공개 샘플 Room을 현재 익명 client가 수정 가능한 독립 Room으로 복제합니다.")
+    public CommonResponse<RoomResponse> copySampleRoom(@PathVariable Long roomId) {
+        return CommonResponse.ok(roomService.copySampleRoom(roomId));
+    }
+
+    @PutMapping("/{roomId}/layout")
+    @Operation(summary = "가구 배치 전체 반영 (manage-furniture 단계)", description = "아직 AI 추천(Layout)을 생성하기 전 단계에서, 가구 추가/이동/삭제/회전을 전체 배열 교체 방식으로 Room에 반영합니다. 이 방의 최종 가구 목록 전체를 보내야 하며(RoomUploadRequest.furniture와 동일한 shape), 위치/회전 변경 및 신규 가구 추가를 모두 포함할 수 있습니다. 이미 AI 추천을 생성해 Layout이 있는 단계의 편집은 이 API가 아니라 PUT /api/layouts/{layoutId}를 사용해야 합니다.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "가구 배치 반영 성공"),
+            @ApiResponse(responseCode = "400", description = "잘못된 가구 데이터 또는 방 범위를 벗어난 좌표"),
+            @ApiResponse(responseCode = "404", description = "존재하지 않는 roomId")
+    })
+    public CommonResponse<RoomResponse> replaceFurniture(@PathVariable Long roomId,
+                                                            @RequestBody RoomFurnitureReplaceRequest request) {
+        return CommonResponse.ok(roomService.replaceFurniture(roomId, request.getFurniture()));
+    }
+
+    @PutMapping("/{roomId}/furniture")
+    @Operation(summary = "기존 가구 상태 변경", description = "기존 방 가구를 DELETED 등으로 상태 변경합니다. 요청 필드명은 layout validate/update의 furniture가 아니라 furnitureUpdates입니다. 각 항목의 id와 status는 필수이며, 가구 위치 변경은 이 API가 아니라 layout validate/update 흐름에서 처리합니다. 예를 들어 기존 책상을 DELETED로 변경한 뒤 새 책상을 추천받을 수 있습니다.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "기존 가구 상태 수정 성공"),
+            @ApiResponse(responseCode = "400", description = "잘못된 가구 status"),
+            @ApiResponse(responseCode = "404", description = "존재하지 않는 roomId 또는 furniture id")
+    })
+    @io.swagger.v3.oas.annotations.parameters.RequestBody(
+            description = "기존 가구 상태 변경 요청. rooms furniture update는 furnitureUpdates 필드를 사용하며, 각 항목은 id/status만 전달합니다.",
+            required = true,
+            content = @Content(examples = @ExampleObject(name = "Delete existing desk", value = """
+                    {
+                      "furnitureUpdates": [
+                        { "id": "desk-1", "status": "DELETED" }
+                      ]
+                    }
+                    """)))
+    public CommonResponse<RoomResponse> updateFurniture(@PathVariable Long roomId,
+                                                          @RequestBody FurnitureUpdateRequest request) {
+        return CommonResponse.ok(roomService.updateFurnitureStatus(roomId, request));
+    }
+}

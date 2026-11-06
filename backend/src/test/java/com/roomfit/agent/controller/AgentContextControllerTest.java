@@ -1,0 +1,328 @@
+package com.roomfit.agent.controller;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.MediaType;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.test.web.servlet.MockMvc;
+
+import java.util.stream.Stream;
+
+import static org.hamcrest.Matchers.hasItems;
+import static org.hamcrest.Matchers.notNullValue;
+import static org.hamcrest.Matchers.nullValue;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+@SpringBootTest
+@AutoConfigureMockMvc
+@Transactional
+class AgentContextControllerTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @Test
+    void createContext_returnsContextWithStyleTagsAndSelectedProducts() throws Exception {
+        mockMvc.perform(post("/api/agent/context")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "roomId": 1,
+                                  "lifestyleGoal": "STUDY_FOCUSED",
+                                  "designStyle": ["MINIMAL", "WHITE_TONE"],
+                                  "requiredItems": ["bed", "desk", "chair"],
+                                  "optionalItems": ["storage", "rug", "lamp"],
+                                  "selectedImageIds": [1, 3],
+                                  "selectedProductIds": ["desk-01", "chair-01"]
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.error").value(nullValue()))
+                .andExpect(jsonPath("$.data.contextId", notNullValue()))
+                .andExpect(jsonPath("$.data.roomId").value(1))
+                .andExpect(jsonPath("$.data.lifestyleGoal").value("STUDY_FOCUSED"))
+                .andExpect(jsonPath("$.data.designStyle").value(hasItems("MINIMAL", "WHITE_TONE")))
+                .andExpect(jsonPath("$.data.requiredItems").value(hasItems("bed", "desk", "chair")))
+                .andExpect(jsonPath("$.data.optionalItems").value(hasItems("storage", "rug", "lamp")))
+                .andExpect(jsonPath("$.data.selectedImageIds").value(hasItems(1, 3)))
+                .andExpect(jsonPath("$.data.selectedProductIds").value(hasItems("desk-01", "chair-01")))
+                .andExpect(jsonPath("$.data.styleTags").value(hasItems(
+                        "minimal", "modern", "white_tone", "study"
+                )))
+                .andExpect(jsonPath("$.data.selectedProducts.length()").value(2))
+                .andExpect(jsonPath("$.data.selectedProducts[0].productId").value("desk-01"))
+                .andExpect(jsonPath("$.data.selectedProducts[0].variantId").value(nullValue()))
+                .andExpect(jsonPath("$.data.selectedProducts[0].width").value(1.2))
+                .andExpect(jsonPath("$.data.selectedProducts[0].requiredClearance.front").value(0.6))
+                .andExpect(jsonPath("$.data.createdAt", notNullValue()));
+    }
+
+    @Test
+    void createContext_withPreferredColorTone_returnsPreferredColorTone() throws Exception {
+        mockMvc.perform(post("/api/agent/context")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "roomId": 1,
+                                  "lifestyleGoal": "STUDY_FOCUSED",
+                                  "designStyle": ["MINIMAL"],
+                                  "requiredItems": ["desk"],
+                                  "selectedImageIds": [1],
+                                  "preferredColorTone": "GRAY"
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.preferredColorTone").value("GRAY"));
+    }
+
+    @Test
+    void createContext_withoutPreferredColorTone_returnsNullPreferredColorTone() throws Exception {
+        mockMvc.perform(post("/api/agent/context")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "roomId": 1,
+                                  "lifestyleGoal": "STUDY_FOCUSED",
+                                  "designStyle": ["MINIMAL"],
+                                  "requiredItems": ["desk"],
+                                  "selectedImageIds": [1]
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.preferredColorTone").value(nullValue()));
+    }
+
+    @Test
+    void createContext_withInvalidPreferredColorTone_returnsInvalidPreferredColorTone() throws Exception {
+        mockMvc.perform(post("/api/agent/context")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "roomId": 1,
+                                  "lifestyleGoal": "STUDY_FOCUSED",
+                                  "designStyle": ["MINIMAL"],
+                                  "requiredItems": ["desk"],
+                                  "selectedImageIds": [1],
+                                  "preferredColorTone": "NEON"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("INVALID_PREFERRED_COLOR_TONE"));
+    }
+
+    @Test
+    void createContext_withClassicAndMidcenturyDesignStyle_isAccepted() throws Exception {
+        mockMvc.perform(post("/api/agent/context")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "roomId": 1,
+                                  "lifestyleGoal": "STUDY_FOCUSED",
+                                  "designStyle": ["CLASSIC", "MIDCENTURY"],
+                                  "requiredItems": ["desk"],
+                                  "selectedImageIds": [1]
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.designStyle").value(hasItems("CLASSIC", "MIDCENTURY")));
+    }
+
+    @Test
+    void createContext_withoutSelectedProducts_returnsEmptySelectedProducts() throws Exception {
+        mockMvc.perform(post("/api/agent/context")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "roomId": 1,
+                                  "lifestyleGoal": "RELAX_FOCUSED",
+                                  "designStyle": ["COZY"],
+                                  "requiredItems": ["bed"],
+                                  "selectedImageIds": [2]
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.selectedProductIds.length()").value(0))
+                .andExpect(jsonPath("$.data.selectedProducts.length()").value(0))
+                .andExpect(jsonPath("$.data.optionalItems.length()").value(0))
+                .andExpect(jsonPath("$.data.styleTags").value(hasItems("natural")));
+    }
+
+    @ParameterizedTest
+    @MethodSource("fixedStyleImages")
+    void createContext_withEachFixedStyleImage_returnsOnlyItsStyleTag(long imageId, String tag) throws Exception {
+        mockMvc.perform(post("/api/agent/context")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "roomId": 1,
+                                  "lifestyleGoal": "STUDY_FOCUSED",
+                                  "designStyle": ["MINIMAL"],
+                                  "requiredItems": ["desk"],
+                                  "selectedImageIds": [%d],
+                                  "selectedProductIds": []
+                                }
+                                """.formatted(imageId)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.selectedImageIds[0]").value(imageId))
+                .andExpect(jsonPath("$.data.styleTags.length()").value(1))
+                .andExpect(jsonPath("$.data.styleTags[0]").value(tag));
+    }
+
+    @Test
+    void createContext_withUnknownRoom_returnsRoomNotFound() throws Exception {
+        mockMvc.perform(post("/api/agent/context")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "roomId": 999,
+                                  "lifestyleGoal": "STUDY_FOCUSED",
+                                  "designStyle": ["MINIMAL"],
+                                  "requiredItems": ["desk"],
+                                  "selectedImageIds": [1]
+                                }
+                                """))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()))
+                .andExpect(jsonPath("$.error.code").value("ROOM_NOT_FOUND"));
+    }
+
+    @Test
+    void createContext_withEmptyRequiredItems_returnsRequiredItemEmpty() throws Exception {
+        mockMvc.perform(post("/api/agent/context")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "roomId": 1,
+                                  "lifestyleGoal": "STUDY_FOCUSED",
+                                  "designStyle": ["MINIMAL"],
+                                  "requiredItems": [],
+                                  "selectedImageIds": [1]
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("REQUIRED_ITEM_EMPTY"));
+    }
+
+    @Test
+    void createContext_withEmptySelectedImageIds_returnsStyleImageEmpty() throws Exception {
+        mockMvc.perform(post("/api/agent/context")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "roomId": 1,
+                                  "lifestyleGoal": "STUDY_FOCUSED",
+                                  "designStyle": ["MINIMAL"],
+                                  "requiredItems": ["desk"],
+                                  "selectedImageIds": []
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("STYLE_IMAGE_EMPTY"));
+    }
+
+    @Test
+    void createContext_withUnknownStyleImage_returnsStyleImageNotFound() throws Exception {
+        mockMvc.perform(post("/api/agent/context")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "roomId": 1,
+                                  "lifestyleGoal": "STUDY_FOCUSED",
+                                  "designStyle": ["MINIMAL"],
+                                  "requiredItems": ["desk"],
+                                  "selectedImageIds": [999]
+                                }
+                                """))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code").value("STYLE_IMAGE_NOT_FOUND"));
+    }
+
+    @Test
+    void createContext_withUnknownProduct_returnsProductNotFound() throws Exception {
+        mockMvc.perform(post("/api/agent/context")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "roomId": 1,
+                                  "lifestyleGoal": "STUDY_FOCUSED",
+                                  "designStyle": ["MINIMAL"],
+                                  "requiredItems": ["desk"],
+                                  "selectedImageIds": [1],
+                                  "selectedProductIds": ["missing-product"]
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("PRODUCT_NOT_FOUND"));
+    }
+
+    @Test
+    void createContext_withInvalidLifestyleGoal_returnsInvalidLifestyleGoal() throws Exception {
+        mockMvc.perform(post("/api/agent/context")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "roomId": 1,
+                                  "lifestyleGoal": "INVALID",
+                                  "designStyle": ["MINIMAL"],
+                                  "requiredItems": ["desk"],
+                                  "selectedImageIds": [1]
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("INVALID_LIFESTYLE_GOAL"));
+    }
+
+    @Test
+    void createContext_withInvalidDesignStyle_returnsInvalidDesignStyle() throws Exception {
+        mockMvc.perform(post("/api/agent/context")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "roomId": 1,
+                                  "lifestyleGoal": "STUDY_FOCUSED",
+                                  "designStyle": ["INVALID"],
+                                  "requiredItems": ["desk"],
+                                  "selectedImageIds": [1]
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("INVALID_DESIGN_STYLE"));
+    }
+
+    @Test
+    void createContext_withInvalidFurnitureType_returnsInvalidFurnitureType() throws Exception {
+        mockMvc.perform(post("/api/agent/context")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "roomId": 1,
+                                  "lifestyleGoal": "STUDY_FOCUSED",
+                                  "designStyle": ["MINIMAL"],
+                                  "requiredItems": ["future_sofa"],
+                                  "selectedImageIds": [1]
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("INVALID_FURNITURE_TYPE"));
+    }
+
+    private static Stream<Arguments> fixedStyleImages() {
+        return Stream.of(
+                Arguments.of(1L, "minimal"),
+                Arguments.of(2L, "natural"),
+                Arguments.of(3L, "modern"),
+                Arguments.of(4L, "classic"),
+                Arguments.of(5L, "midcentury")
+        );
+    }
+}

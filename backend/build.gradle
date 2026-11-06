@@ -1,0 +1,58 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.5.16'
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'com.roomfit'
+version = '0.0.1-SNAPSHOT'
+description = 'RoomFit-Backend'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.17'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    runtimeOnly 'org.postgresql:postgresql'
+    runtimeOnly 'com.h2database:h2'
+    compileOnly 'org.projectlombok:lombok'
+    developmentOnly 'org.springframework.boot:spring-boot-devtools'
+    annotationProcessor 'org.projectlombok:lombok'
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testCompileOnly 'org.projectlombok:lombok'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    testAnnotationProcessor 'org.projectlombok:lombok'
+}
+
+tasks.named('test') {
+    useJUnitPlatform {
+        excludeTags 'llm-evaluation'
+    }
+}
+
+def realLlmEvaluationConfigured = {
+    def required = ['ROOMFIT_LLM_FEEDBACK_ENABLED', 'ROOMFIT_LLM_API_KEY',
+                    'ROOMFIT_LLM_BASE_URL', 'ROOMFIT_LLM_MODEL']
+    return required.every { key -> System.getenv(key)?.trim() } \
+            && System.getenv('ROOMFIT_LLM_FEEDBACK_ENABLED').trim().equalsIgnoreCase('true')
+}
+
+tasks.register('realLlmEvaluation', Test) {
+    group = 'verification'
+    description = 'Runs opt-in, non-production LLM feedback semantic evaluations when all required environment variables are present.'
+    useJUnitPlatform {
+        includeTags 'llm-evaluation'
+    }
+    shouldRunAfter tasks.named('test')
+    onlyIf('requires explicit non-production LLM environment variables') { realLlmEvaluationConfigured() }
+}

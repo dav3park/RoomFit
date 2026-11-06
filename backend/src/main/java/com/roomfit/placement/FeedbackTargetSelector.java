@@ -1,0 +1,28 @@
+package com.roomfit.placement;
+
+public record FeedbackTargetSelector(
+        String furnitureId,
+        String furnitureType,
+        String labelKeyword,
+        FeedbackLocationHint locationHint,
+        Integer ordinal
+) {
+    public FeedbackTargetSelector(String furnitureId, String furnitureType, String labelKeyword) {
+        this(furnitureId, furnitureType, labelKeyword, null, null);
+    }
+
+    public FeedbackTargetSelector {
+        furnitureId = normalize(furnitureId);
+        furnitureType = normalize(furnitureType);
+        labelKeyword = normalize(labelKeyword);
+    }
+
+    public boolean isEmpty() {
+        return furnitureId.isBlank() && furnitureType.isBlank() && labelKeyword.isBlank()
+                && locationHint == null && ordinal == null;
+    }
+
+    private static String normalize(String value) {
+        return value == null ? "" : value.trim();
+    }
+}

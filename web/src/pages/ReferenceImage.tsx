@@ -1,0 +1,129 @@
+import { useEffect, useState } from "react";
+import { FiCheck } from "react-icons/fi";
+import PageStepHeader from "../components/ui/PageStepHeader";
+import InlineSelectionValidation from "../components/ui/InlineSelectionValidation";
+import { hasRoomPreferences } from "../config/roomPreferences";
+import {
+  getReferenceStyleGuidanceMessage,
+  normalizeInteriorStyleId,
+  notifyOnboardingSelectionChanged,
+  ONBOARDING_VALIDATION_EVENT,
+} from "../config/onboardingSelection";
+
+import minimal from "../assets/styles/minimal.png";
+import natural from "../assets/styles/natural.png";
+import modern from "../assets/styles/modern.png";
+import classic from "../assets/styles/classic.png";
+import midcentury from "../assets/styles/midcentury.png";
+
+
+
+const styles = [
+  {
+    id: "minimal",
+    title: "미니멀",
+    image: minimal,
+  },
+  {
+    id: "natural",
+    title: "내추럴",
+    image: natural,
+  },
+  {
+    id: "modern",
+    title: "모던",
+    image: modern,
+  },
+  {
+    id: "classic",
+    title: "클래식",
+    image: classic,
+  },
+  {
+    id: "midcentury",
+    title: "미드센추리",
+    image: midcentury,
+  },
+];
+
+const referenceImageVisitedKey = "roomfit:visited:reference-image";
+
+export default function ReferenceImage() {
+  const [selectedStyle, setSelectedStyle] = useState(() => {
+    const selectedRoomId = localStorage.getItem("roomfit:selectedRoomId");
+    const hasRestoredPreferences = selectedRoomId ? hasRoomPreferences(selectedRoomId) : false;
+    if (!sessionStorage.getItem(referenceImageVisitedKey) && !hasRestoredPreferences) {
+      localStorage.removeItem("roomfit:selectedStyle");
+    }
+    sessionStorage.setItem(referenceImageVisitedKey, "true");
+
+    // 복원 값도 지원하는 유효 스타일일 때만 선택으로 인정한다 — 빈 문자열/지원하지
+    // 않는 값은 미선택("")으로 두고, 첫 번째 스타일로 임의 치환하지 않는다.
+    return normalizeInteriorStyleId(localStorage.getItem("roomfit:selectedStyle")) ?? "";
+  });
+  const [validationMessage, setValidationMessage] = useState("");
+
+  useEffect(() => {
+    if (selectedStyle) {
+      localStorage.setItem("roomfit:selectedStyle", selectedStyle);
+    } else {
+      localStorage.removeItem("roomfit:selectedStyle");
+    }
+
+    // 선택이 바뀌었으니 Navbar가 "다음 단계" 활성화 여부를 다시 계산하도록 알린다.
+    notifyOnboardingSelectionChanged();
+  }, [selectedStyle]);
+
+  useEffect(() => {
+    const showValidation = (event: Event) => {
+      const detail = (event as CustomEvent<{ pathname?: string }>).detail;
+      if (detail?.pathname !== "/reference-image") return;
+      setValidationMessage(getReferenceStyleGuidanceMessage(normalizeInteriorStyleId(selectedStyle)));
+    };
+    window.addEventListener(ONBOARDING_VALIDATION_EVENT, showValidation);
+    return () => window.removeEventListener(ONBOARDING_VALIDATION_EVENT, showValidation);
+  }, [selectedStyle]);
+
+  return (
+    <main className="min-h-[calc(100vh-76px)] bg-[#fbfbfb] px-5 py-8 text-[#141414] sm:px-8 lg:px-10">
+      <section className="mx-auto max-w-7xl">
+        <PageStepHeader step={3} title="라이프 스타일 및 선호하는 디자인 선택" className="mb-12" />
+
+        <header className="mb-8 text-center">
+          <h1 className="text-3xl font-extrabold tracking-normal sm:text-4xl">마음에 드는 인테리어 이미지를 선택해주세요</h1>
+          <p className="mt-3 text-sm font-semibold text-[#777777]">선택한 이미지는 AI 추천 스타일에 반영됩니다.</p>
+        </header>
+
+        <InlineSelectionValidation message={validationMessage} />
+
+        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-5">
+          {styles.map((style) => {
+            const selected = selectedStyle === style.id;
+
+            return (
+              <button key={style.id} type="button" onClick={() => { setSelectedStyle(style.id); setValidationMessage(""); }} className="group text-left">
+                <span
+                  className={`relative block overflow-hidden rounded-lg border bg-white p-2 transition-all group-hover:-translate-y-1 group-hover:shadow-[0_18px_35px_rgba(0,0,0,0.08)] ${
+                    selected ? "border-[#111111] ring-2 ring-[#111111]" : "border-[#e5e5e5]"
+                  }`}
+                >
+                  {selected && (
+                    <span className="absolute right-3 top-3 z-10 grid h-6 w-6 place-items-center rounded-full bg-[#111111] text-white">
+                      <FiCheck className="h-4 w-4" />
+                    </span>
+                  )}
+                  <img
+                    src={style.image}
+                    alt={style.title}
+                    className="h-44 w-full rounded-md object-cover transition-transform duration-300 group-hover:scale-105"
+                  />
+                </span>
+                <strong className="mt-4 block text-center text-sm font-extrabold">{style.title}</strong>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+    </main>
+  );
+}

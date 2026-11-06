@@ -1,0 +1,80 @@
+name: Deploy Frontend
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+        env:
+          VITE_API_BASE_URL: https://roomfit-khu.kro.kr
+
+      - name: Deploy dist to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "dist/*"
+          target: "/home/ubuntu/roomfit-web-dist"
+          strip_components: 1
+
+      - name: Prevent stale HTML on room navigation
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -eu
+            config=/etc/nginx/conf.d/roomfit-html-cache.conf
+            backup=$(mktemp)
+            had_config=false
+            if sudo test -f "$config"; then
+              sudo cp "$config" "$backup"
+              had_config=true
+            fi
+            rollback() {
+              if [ "$had_config" = true ]; then
+                sudo cp "$backup" "$config"
+              else
+                sudo rm -f "$config"
+              fi
+              sudo nginx -t && sudo systemctl reload nginx
+            }
+            # Only RoomFit HTML changes; model files and hashed JS retain their caching.
+            sudo tee "$config" >/dev/null <<'NGINX'
+            map "$host:$sent_http_content_type" $roomfit_html_cache_control {
+                default "";
+                "~^roomfit-khu\.kro\.kr:text/html" "no-store, no-cache, must-revalidate";
+            }
+            add_header Cache-Control $roomfit_html_cache_control always;
+            NGINX
+            if ! sudo nginx -t || ! sudo systemctl reload nginx; then
+              rollback
+              rm -f "$backup"
+              exit 1
+            fi
+            for path in / /rooms /workspace /manage-furniture; do
+              if ! curl -fsSI "https://roomfit-khu.kro.kr$path" | tr -d '\r' | grep -qi '^cache-control:.*no-store'; then
+                rollback
+                rm -f "$backup"
+                exit 1
+              fi
+            done
+            rm -f "$backup"

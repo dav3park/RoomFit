@@ -93,7 +93,7 @@ export function FurnitureMesh({
 
   const handlePointerDown = (event: ThreeEvent<PointerEvent>) => {
     event.stopPropagation();
-    if (directDrag && event.button === 0) {
+    if (directDrag && canTransform && event.button === 0) {
       const point=floorPoint(event);
       if (point) {
         dragging.current={x:event.clientX,y:event.clientY,offset:{x:item.position.x-point.x,z:item.position.z-point.z},moved:false,enabled:orbitControls()?.enabled ?? true};

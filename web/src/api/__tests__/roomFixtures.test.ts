@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { applyBackendFurnitureToLayout, toRoomFurnitureReplaceRequest, type BackendFurnitureApiItem } from "../rooms";
 import { resolveFurnitureInstallations } from "../../geometry/furnitureInstallation";
 import { computeLocalValidationIssues } from "../../geometry/liveValidation";
+import { isImmovableFixture } from "../../config/fixtureType";
 import type { RoomLayout } from "../../types";
 
 const room: RoomLayout = {
@@ -92,6 +93,26 @@ describe("RoomPlan fixtures", () => {
     const collisions = computeLocalValidationIssues(layout.furniture, layout, "render")
       .filter((issue) => issue.type === "BODY_COLLISION");
     expect(collisions).toHaveLength(1);
+  });
+
+  it("locks built-in cabinetry but lets free-standing appliances move", () => {
+    const layout = applyBackendFurnitureToLayout(room, [
+      scanned({ id: "upper-1", type: "upper_cabinet", mount: "WALL", elevation: 1.45 }),
+      scanned({ id: "base-1", type: "base_cabinet" }),
+      scanned({ id: "sink-1", type: "sink" }),
+      scanned({ id: "stove-1", type: "stove", mount: "WALL", elevation: 0.86 }),
+      scanned({ id: "fridge-1", type: "refrigerator" }),
+      scanned({ id: "washer-1", type: "washer_dryer" }),
+    ]);
+    const byId = new Map(layout.furniture.map((item) => [item.id, item]));
+    for (const id of ["upper-1", "base-1", "sink-1"]) {
+      expect(isImmovableFixture(byId.get(id)!)).toBe(true);
+      expect(byId.get(id)).toMatchObject({ removable: false });
+    }
+    for (const id of ["stove-1", "fridge-1", "washer-1"]) {
+      expect(isImmovableFixture(byId.get(id)!)).toBe(false);
+      expect(byId.get(id)).toMatchObject({ removable: true, recommendationLocked: true });
+    }
   });
 
   it("does not flag a chair tucked under a table", () => {

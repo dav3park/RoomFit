@@ -131,13 +131,13 @@ export default function WorkspaceDemo({service}: {service?: WorkspaceService}) {
     changeRoom({ ...current, furniture: current.furniture.map(item => item.id === selected.id ? { ...update(item), status: 'user_modified' } : item) });
   }
   function move(id: string, position: Vector2D) {
-    if (candidate) return;
     const current = latestRoom.current;
+    if (candidate || current.furniture.some(item => item.id === id && isImmovableFixture(item))) return;
     changeRoom({ ...current, furniture: current.furniture.map(item => item.id === id ? { ...moveFurnitureInsideRoom(current, item, position), status: 'user_modified' } : item) });
   }
   function rotate(id: string) {
-    if (candidate) return;
     const current = latestRoom.current;
+    if (candidate || current.furniture.some(item => item.id === id && isImmovableFixture(item))) return;
     changeRoom({ ...current, furniture: current.furniture.map(item => item.id === id ? { ...rotateFurnitureInsideRoom(current, item, item.rotationY + Math.PI / 2), status: 'user_modified' } : item) });
   }
   function place(product: DemoProduct, drag = false) {

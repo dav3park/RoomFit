@@ -1,5 +1,6 @@
 package com.roomfit.placement;
 
+import com.roomfit.room.FixtureType;
 import com.roomfit.room.Fixtures;
 import com.roomfit.room.Furniture;
 import com.roomfit.room.FurnitureMount;
@@ -56,6 +57,14 @@ class FixtureCollisionTest {
                 .satisfies(f -> assertThat(f.getPosition().getX()).isEqualTo(2.0));
         assertThat(Fixtures.keptOnDiscard(List.of(baseCabinet, fridge, item("bed-1", "bed", 2, 2, 1, 2, 0.5))))
                 .extracting(Furniture::getId).containsExactly("base-1", "fridge-1");
+    }
+
+    @Test
+    void builtInCabinetry_isImmovableButFreeStandingAppliancesMove() {
+        assertThat(List.of("upper_cabinet", "base_cabinet", "sink"))
+                .allMatch(FixtureType::isImmovable);
+        assertThat(List.of("stove", "refrigerator", "washer_dryer"))
+                .noneMatch(FixtureType::isImmovable);
     }
 
     @Test

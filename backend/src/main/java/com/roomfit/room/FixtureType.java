@@ -8,15 +8,15 @@ import java.util.Optional;
  * RoomPlan이 감지하는 "옮길 수 없는 장애물". 카탈로그 상품이 아니라서 가구 타입과 분리한다.
  * 업로드 시 type 필드에 {@link #code()} 값(소문자)이 그대로 들어온다.
  * 붙박이 설비(싱크대·하부장 등)는 배치 엔진·피드백이 이동/삭제하지 않고, 새 가구의 충돌 기준으로만
- * 쓰인다. 냉장고처럼 놓기만 한 가전({@link #movable()})은 상품은 아니지만 사용자가 옮길 수 있다.
+ * 쓰인다. 냉장고·가스레인지·세탁기처럼 놓기만 한 가전({@link #movable()})은 상품은 아니지만 사용자가 옮길 수 있다.
  */
 public enum FixtureType {
     SINK("sink", "싱크대"),
-    STOVE("stove", "가스레인지"),
+    STOVE("stove", "가스레인지", true),
     OVEN("oven", "오븐"),
     REFRIGERATOR("refrigerator", "냉장고", true),
     DISHWASHER("dishwasher", "식기세척기"),
-    WASHER_DRYER("washer_dryer", "세탁기"),
+    WASHER_DRYER("washer_dryer", "세탁기", true),
     TOILET("toilet", "변기"),
     BATHTUB("bathtub", "욕조"),
     FIREPLACE("fireplace", "벽난로"),

@@ -69,6 +69,7 @@ export function RoomViewer({
   const activeCamera = alignCameraToEntrance ? entranceViewCamera(room, camera) : camera;
   const cameraMode = alignCameraToEntrance ? `entrance-${room.id}` : `default-${room.id}`;
   const visibleFurniture = furniture.filter((item) => item.status !== "deleted");
+  const selectedFurniture = visibleFurniture.find((item) => item.id === selectedFurnitureId);
   const installations=resolveFurnitureInstallations(room,visibleFurniture);
   // Recomputed from the furniture list alone on every render — including
   // every drag tick — so a collision/clearance problem shows up as a
@@ -116,8 +117,7 @@ export function RoomViewer({
 
           {visibleFurniture.map((item) => {
             const installation=installations.get(item.id);
-            // 창문 부착형과 붙박이 설비(싱크대·상부장 등)는 끌어서 옮길 수 없다. 냉장고는 옮길 수 있다.
-            const anchored=placementPolicy(item).installation==='WINDOW'||isImmovableFixture(item);
+            const anchored=isAnchored(item);
             const itemIssues = liveIssues.filter((issue) => issue.furnitureId === item.id);
             const bodySeverity = itemIssues.some((issue) => issue.severity === "ERROR") ? "ERROR" : null;
             const warningZoneSides = itemIssues
@@ -167,10 +167,10 @@ export function RoomViewer({
       </Canvas>
       <div className="viewer-caption">
         {showEditingHelpers && <span>가구를 클릭한 뒤 드래그해 이동할 수 있습니다.</span>}
-        {showEditingHelpers && selectedFurnitureId && onRotateFurniture && (
+        {showEditingHelpers && selectedFurniture && !isAnchored(selectedFurniture) && onRotateFurniture && (
           <button
             type="button"
-            onClick={() => onRotateFurniture(selectedFurnitureId)}
+            onClick={() => onRotateFurniture(selectedFurniture.id)}
             className="rounded-full bg-[#111111] px-3 py-1 text-[11px] font-extrabold text-white transition-colors hover:bg-[#333333]"
           >
             ⟳ 90° 회전
@@ -333,6 +333,11 @@ function RoomShell({
 // Falls back to the default wall thickness (matches Wall.tsx's own default)
 // when an opening has no wallId (older/hand-authored data) or its wall
 // somehow isn't found.
+// 창문 부착형과 붙박이 설비(싱크대·상부장 등)는 끌거나 돌릴 수 없다. 냉장고·가스레인지·세탁기는 옮길 수 있다.
+function isAnchored(item: Furniture): boolean {
+  return placementPolicy(item).installation === "WINDOW" || isImmovableFixture(item);
+}
+
 function wallThicknessFor(wallId: string | undefined, walls: WallSegment[]): number {
   return walls.find((wall) => wall.id === wallId)?.thickness ?? 0.12;
 }

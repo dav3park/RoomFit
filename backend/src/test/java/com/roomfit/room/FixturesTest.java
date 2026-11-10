@@ -30,7 +30,7 @@ class FixturesTest {
 
     @Test
     void pin_dropsFixturesTheEngineInvented() {
-        List<Furniture> result = Fixtures.pin(List.of(), List.of(item("stove-x", "stove", 1.0)));
+        List<Furniture> result = Fixtures.pin(List.of(), List.of(item("sink-x", "sink", 1.0)));
         assertThat(result).isEmpty();
     }
 

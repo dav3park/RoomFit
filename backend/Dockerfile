@@ -18,4 +18,4 @@ COPY --from=build /app/build/libs/*SNAPSHOT.jar app.jar
 
 EXPOSE 10000
 
-CMD ["sh", "-c", "java -XX:MaxRAMPercentage=70.0 -Dserver.address=0.0.0.0 -Dserver.port=${PORT:-10000} -jar app.jar"]
+CMD ["sh", "-c", "java -XX:MaxRAMPercentage=45.0 -Dserver.address=0.0.0.0 -Dserver.port=${PORT:-10000} -jar app.jar"]

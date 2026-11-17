@@ -13,10 +13,16 @@ RoomFit은 iPhone으로 스캔한 내 방과 실제 판매 가구 193종의 치�
 
 ## 🏆 Awards
 
-| Date | Competition | Award |
-|:---|:---|:---|
-| 2026.11 | [SW중심대학 연합 AI·SW Festival](https://swedu.khu.ac.kr/bbs/board.php?bo_table=07_01&wr_id=2610) | 🥈 최우수상 |
-| 2026.08 | [SW중심대학 Digital Competition (SW Division)](https://dacon.io/competitions/official/236693/overview/description) | 🥉 우수상 & 🏅 인기상 |
+| Date | Competition | Award | Team |
+|:---|:---|:---|:---|
+| 2026.11 | [SW중심대학 연합 AI·SW Festival](https://swedu.khu.ac.kr/bbs/board.php?bo_table=07_01&wr_id=2610) | 🥈 최우수상 | 박찬종 · 김병규 |
+| 2026.08 | [SW중심대학 Digital Competition (SW Division)](https://dacon.io/competitions/official/236693/overview/description) | 🥉 우수상 & 🏅 인기상 | 신정안 · 최진영 · 박찬종 · 김병규 |
+
+<p align="center">
+  <img src="docs/images/award-ai-sw-festival.jpg" width="48%" alt="SW중심대학 연합 AI·SW페스티벌 2026 최우수상">
+  <img src="docs/images/award-digital-competition.jpg" width="48%" alt="2026 AI·SW중심대학 디지털 경진대회 우수상·인기상">
+</p>
+<p align="center"><sub>AI·SW페스티벌 최우수상 · 디지털 경진대회 우수상 & 인기상</sub></p>
 
 ## Why RoomFit
 
@@ -152,9 +158,7 @@ RoomFit 모노레포입니다. 각 폴더의 커밋 히스토리는 이전 레�
 - `.github/workflows/backend-ci.yml` — `backend/**` 변경 시 테스트 → GHCR 이미지 → EC2 배포
 - `.github/workflows/web-deploy.yml` — `web/**` 변경 시 빌드 → EC2 배포
 
-## Team 파라파라 · 경희대학교
+## Team
 
-| 이름 | 역할 |
-|:---|:---|
-| 박찬종 | 팀장 |
-| 김병규 | 팀원 |
+- **AI·SW Festival** — 박찬종 · 김병규 (파라파라, 경희대학교)
+- **Digital Competition** — 신정안 · 최진영 · 박찬종 · 김병규
